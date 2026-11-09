@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>APK → Исходники</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--card:#f1f3f5;--ac:#2563eb;--bd:#d0d5dd;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--fg:#e8eaed;--card:#1c2127;--ac:#6ea0ff;--bd:#2f3640;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111418;--fg:#e8eaed;--card:#1c2127;--ac:#6ea0ff;--bd:#2f3640;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif;padding:12px}
+h1{font-size:20px;margin:0 0 8px}
+#drop{border:2px dashed var(--bd);border-radius:12px;padding:22px;text-align:center;background:var(--card);cursor:pointer}
+#drop.on{border-color:var(--ac)}
+button,input{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}button.p{background:var(--ac);color:#fff;border:0}
+#info{margin:10px 0;font-size:13px;opacity:.8}
+#list{max-height:34vh;overflow:auto;border:1px solid var(--bd);border-radius:8px;margin:8px 0}
+#list div{padding:5px 10px;border-bottom:1px solid var(--bd);font:12px monospace;cursor:pointer;word-break:break-all}
+#list div:hover,#list div.sel{background:var(--card);color:var(--ac)}
+#view{white-space:pre;overflow:auto;max-height:50vh;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:10px;font:12px/1.4 monospace;tab-size:2}
+#view img{max-width:100%}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+</style></head><body>
+<h1>APK → исходники</h1>
+<div id="drop">Нажми или перетащи .apk сюда<input id="f" type="file" accept=".apk,.zip" hidden></div>
+<div id="info"></div>
+<div id="app" hidden>
+<div class="row"><input id="q" placeholder="Поиск по файлам…" style="flex:1;min-width:120px"><button class="p" id="dl">Скачать всё (zip)</button><button id="cp">Копировать</button></div>
+<div id="list"></div><div id="view"></div>
+</div>
+<script>
+const $=s=>document.querySelector(s),td=new TextDecoder();
+let files=[],cur='',zipOut=null;
+const info=t=>$('#info').textContent=t;
+
+function axml(buf){const d=new DataView(buf),u8=new Uint8Array(buf);let p=8,S=[],x='<?xml version="1.0" encoding="utf-8"?>\n',ind=0,first=true;
+const g=i=>i<0||i>=S.length?'':S[i];
+while(p+8<=buf.byteLength){const t=d.getUint16(p,true),sz=d.getUint32(p+4,true);
+if(t==1){const n=d.getUint32(p+8,true),fl=d.getUint32(p+16,true),ss=d.getUint32(p+20,true);
+for(let i=0;i<n;i++){let o=p+ss+d.getUint32(p+28+i*4,true);
+if(fl&256){let l=u8[o++];if(l&128)o++;let b=u8[o++];if(b&128)b=((b&127)<<8)|u8[o++];S.push(td.decode(u8.subarray(o,o+b)))}
+else{let l=d.getUint16(o,true);o+=2;if(l&32768){l=((l&32767)<<16)|d.getUint16(o,true);o+=2}S.push(new TextDecoder('utf-16le').decode(u8.subarray(o,o+l*2)))}}}
+else if(t==0x102){const nm=g(d.getInt32(p+20,true)),as=d.getUint16(p+24,true),ac=d.getUint16(p+28,true);let a='';
+if(first){a=' xmlns:android="http://schemas.android.com/apk/res/android"';first=false}
+for(let i=0;i<ac;i++){const q=p+16+as+i*20,ns=d.getInt32(q,true),an=g(d.getInt32(q+4,true)),raw=d.getInt32(q+8,true),ty=u8[q+15],dt=d.getUint32(q+16,true);
+let v=ty==3?g(raw):ty==0x12?(dt?'true':'false'):ty==0x10?(dt|0):ty==1?'@0x'+dt.toString(16):'0x'+dt.toString(16);
+a+=' '+(ns>=0?'android:':'')+an+'="'+String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')+'"'}
+x+='  '.repeat(ind++)+'<'+nm+a+'>\n'}
+else if(t==0x103)x+='  '.repeat(--ind)+'</'+g(d.getInt32(p+20,true))+'>\n';
+if(sz<8)break;p+=sz}return x}
+
+function dex(buf){const d=new DataView(buf),u8=new Uint8Array(buf),U=o=>d.getUint32(o,true),H=o=>d.getUint16(o,true);
+const so=U(0x3C),to=U(0x44),po=U(0x4C),fo=U(0x54),mo=U(0x5C),n=U(0x60),co=U(0x64);
+const uleb=o=>{let r=0,s=0,b;do{b=u8[o.p++];r+=(b&127)*2**s;s+=7}while(b&128);return r};
+const str=i=>{const o={p:U(so+i*4)};uleb(o);let e=o.p;while(u8[e])e++;return td.decode(u8.subarray(o.p,e))};
+const PR={V:'void',Z:'boolean',B:'byte',S:'short',C:'char',I:'int',J:'long',F:'float',D:'double'};
+const ty=i=>{let s=str(U(to+i*4)),a='';while(s[0]=='['){a+='[]';s=s.slice(1)}return(s[0]=='L'?s.slice(1,-1).replace(/\//g,'.'):PR[s])+a};
+const mods=(f,m)=>[f&1&&'public',f&2&&'private',f&4&&'protected',f&8&&'static',f&16&&'final',m&&f&0x400&&'abstract'].filter(Boolean).join(' ');
+const out={};
+for(let c=0;c<n;c++){const q=co+c*32,cn=ty(U(q)),af=U(q+4),sc=U(q+8),io=U(q+12),cd=U(q+24);
+const k=cn.lastIndexOf('.'),pk=k<0?'':cn.slice(0,k),sn=cn.slice(k+1);
+let j=(pk?'package '+pk+';\n\n':'')+mods(af&~0x200,1)+(af&0x200?' interface ':' class ')+sn;
+if(sc!=0xffffffff){const s=ty(sc);if(s!='java.lang.Object')j+=' extends '+s}
+if(io){const m=U(io),l=[];for(let i=0;i<m;i++)l.push(ty(H(io+4+i*2)));if(l.length)j+=' implements '+l.join(', ')}
+j+=' {\n';
+if(cd){const o={p:cd},cnt=[uleb(o),uleb(o),uleb(o),uleb(o)];
+for(let g=0;g<4;g++){let idx=0;for(let i=0;i<cnt[g];i++){idx+=uleb(o);const fl=uleb(o);
+if(g<2){const f=fo+idx*8;j+='  '+mods(fl)+' '+ty(H(f+2))+' '+str(U(f+4))+';\n'}
+else{const code=uleb(o),m=mo+idx*8,pr=po+H(m+2)*12,nm=str(U(m+4)),ret=ty(U(pr+4)),pl=U(pr+8),ps=[];
+if(pl){const z=U(pl);for(let t=0;t<z;t++)ps.push(ty(H(pl+4+t*2))+' p'+t)}
+const body=code?'{ /* bytecode */ }':';';
+if(nm=='<clinit>')j+='  static { }\n';
+else j+='  '+mods(fl,1)+(nm=='<init>'?' '+sn:' '+ret+' '+nm)+'('+ps.join(', ')+') '+body+'\n'}}}}
+out['src/'+cn.replace(/\./g,'/')+'.java']=j+'}\n'}
+return out}
+
+async function load(file){
+info('Распаковка…');files=[];zipOut=new JSZip();
+try{const z=await JSZip.loadAsync(file);const names=Object.keys(z.files).filter(n=>!z.files[n].dir);
+let nc=0;
+for(const n of names){const e=z.files[n],raw=async()=>e.async('arraybuffer');
+if(n=='AndroidManifest.xml'){try{const t=axml(await raw());files.push({p:n,t});zipOut.file(n,t);continue}catch(x){}}
+if(/^classes\d*\.dex$/.test(n)){try{const o=dex(await raw());for(const k in o){files.push({p:k,t:o[k]});zipOut.file(k,o[k]);nc++}}catch(x){console.error(n,x)}
+files.push({p:n,sz:e._data.uncompressedSize,raw});continue}
+files.push({p:n,sz:e._data.uncompressedSize,raw});zipOut.file(n,e.async('uint8array'))}
+files.sort((a,b)=>a.p.localeCompare(b.p));
+info('Файлов: '+names.length+', классов восстановлено: '+nc+'. Тела методов (байткод) не декомпилируются — для полного Java используй jadx.');
+$('#app').hidden=false;render();
+const m=files.find(f=>f.p=='AndroidManifest.xml');if(m)show(m)}
+catch(e){info('Ошибка: '+e.message)}}
+
+function render(){const q=$('#q').value.toLowerCase(),L=$('#list');L.innerHTML='';
+files.filter(f=>f.p.toLowerCase().includes(q)).slice(0,1500).forEach(f=>{const d=document.createElement('div');d.textContent=f.p;if(f.p==cur)d.className='sel';d.onclick=()=>show(f);L.appendChild(d)})}
+
+async function show(f){cur=f.p;render();const v=$('#view');v.textContent='';
+if(f.t!=null){v.textContent=f.t;return}
+const ext=f.p.split('.').pop().toLowerCase(),b=await f.raw();
+if(['png','jpg','jpeg','gif','webp'].includes(ext)){const i=new Image();i.src=URL.createObjectURL(new Blob([b]));v.appendChild(i);return}
+const u=new Uint8Array(b.slice(0,300000));let bin=0;for(let i=0;i<Math.min(u.length,2000);i++)if(u[i]==0)bin++;
+if(bin>2||/^(dex|arsc|so|png)$/.test(ext)){v.textContent='[бинарный файл, '+f.sz+' байт]';return}
+v.textContent=td.decode(u)+(b.byteLength>300000?'\n…обрезано':'')}
+
+$('#q').oninput=render;
+$('#cp').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('#view').textContent).catch(()=>{});
+$('#dl').onclick=async()=>{if(!zipOut)return;info('Сборка zip…');const b=await zipOut.generateAsync({type:'blob'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='apk-source.zip';a.click();info('Готово')};
+const dr=$('#drop'),fi=$('#f');dr.onclick=()=>fi.click();fi.onchange=()=>fi.files[0]&&load(fi.files[0]);
+dr.ondragover=e=>{e.preventDefault();dr.classList.add('on')};dr.ondragleave=()=>dr.classList.remove('on');
+dr.ondrop=e=>{e.preventDefault();dr.classList.remove('on');e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])};
+</script></body></html>
